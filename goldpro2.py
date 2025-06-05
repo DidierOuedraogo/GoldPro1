@@ -15,45 +15,6 @@ from datetime import datetime
 import io
 import warnings
 
-# Gestion des imports optionnels
-try:
-    from scipy import stats
-    SCIPY_AVAILABLE = True
-except ImportError:
-    SCIPY_AVAILABLE = False
-    warnings.warn("scipy non disponible - fonctionnalités statistiques limitées")
-
-try:
-    from sklearn.ensemble import IsolationForest
-    SKLEARN_AVAILABLE = True
-except ImportError:
-    SKLEARN_AVAILABLE = False
-    warnings.warn("scikit-learn non disponible - Isolation Forest désactivé")
-
-try:
-    import seaborn as sns
-    import matplotlib.pyplot as plt
-    SEABORN_AVAILABLE = True
-except ImportError:
-    SEABORN_AVAILABLE = False
-
-try:
-    import streamlit_extras
-    from streamlit_extras.metric_cards import style_metric_cards
-    from streamlit_extras.colored_header import colored_header
-    from streamlit_extras.add_vertical_space import add_vertical_space
-    EXTRAS_AVAILABLE = True
-except ImportError:
-    EXTRAS_AVAILABLE = False
-    # Fonctions de remplacement
-    def colored_header(label, description, color_name):
-        st.header(label)
-        st.caption(description)
-    
-    def add_vertical_space(num):
-        for _ in range(num):
-            st.write("")
-
 # Configuration de la page
 st.set_page_config(
     page_title="Gold Analysis Pro",
@@ -175,40 +136,16 @@ class OutlierDetector:
     
     @staticmethod
     def zscore_method(data, column, threshold=3):
-        """Méthode Z-Score"""
-        if SCIPY_AVAILABLE:
-            z_scores = np.abs(stats.zscore(data[column].dropna()))
-            data_clean = data.dropna(subset=[column])
+        """Méthode Z-Score simplifiée"""
+        data_clean = data.dropna(subset=[column])
+        mean = data_clean[column].mean()
+        std = data_clean[column].std()
+        if std > 0:
+            z_scores = np.abs((data_clean[column] - mean) / std)
             outliers = data_clean[z_scores > threshold]
         else:
-            # Calcul manuel du z-score
-            data_clean = data.dropna(subset=[column])
-            mean = data_clean[column].mean()
-            std = data_clean[column].std()
-            if std > 0:
-                z_scores = np.abs((data_clean[column] - mean) / std)
-                outliers = data_clean[z_scores > threshold]
-            else:
-                outliers = pd.DataFrame()
+            outliers = pd.DataFrame()
         return outliers, threshold
-    
-    @staticmethod
-    def isolation_forest(data, columns, contamination=0.1):
-        """Isolation Forest pour détection multivariée"""
-        if SKLEARN_AVAILABLE:
-            from sklearn.ensemble import IsolationForest
-            data_clean = data[columns].dropna()
-            iso_forest = IsolationForest(contamination=contamination, random_state=42)
-            outliers_pred = iso_forest.fit_predict(data_clean)
-            outliers = data_clean[outliers_pred == -1]
-            return outliers
-        else:
-            # Alternative : utiliser IQR sur plusieurs colonnes
-            outliers_indices = set()
-            for col in columns:
-                outliers_col, _, _ = OutlierDetector.iqr_method(data, col)
-                outliers_indices.update(outliers_col.index)
-            return data.loc[list(outliers_indices)]
     
     @staticmethod
     def percentile_method(data, column, lower_pct=5, upper_pct=95):
@@ -218,52 +155,17 @@ class OutlierDetector:
         outliers = data[(data[column] < lower_bound) | (data[column] > upper_bound)]
         return outliers, lower_bound, upper_bound
 
-# Fonction pour les tests statistiques
-def perform_statistical_tests(data, col1, col2):
-    """Effectue des tests statistiques sur les données"""
-    results = {}
-    
-    if SCIPY_AVAILABLE:
-        # Test de normalité
-        _, p_value_1 = stats.shapiro(data[col1].dropna())
-        _, p_value_2 = stats.shapiro(data[col2].dropna())
-        results['shapiro_test'] = {
-            col1: p_value_1,
-            col2: p_value_2
-        }
-        
-        # Corrélations
-        pearson_corr, pearson_p = stats.pearsonr(
-            data[col1].dropna(),
-            data[col2].dropna()
-        )
-        spearman_corr, spearman_p = stats.spearmanr(
-            data[col1].dropna(),
-            data[col2].dropna()
-        )
-        results['correlations'] = {
-            'pearson': (pearson_corr, pearson_p),
-            'spearman': (spearman_corr, spearman_p)
-        }
-        
-        # Test t apparié
-        t_stat, t_p_value = stats.ttest_rel(
-            data[col1].dropna(),
-            data[col2].dropna()
-        )
-        results['ttest'] = (t_stat, t_p_value)
-    else:
-        # Calculs simplifiés sans scipy
-        # Corrélation simple
-        corr = data[[col1, col2]].corr().iloc[0, 1]
-        results['correlations'] = {
-            'pearson': (corr, None),
-            'spearman': (None, None)
-        }
-        results['shapiro_test'] = {col1: None, col2: None}
-        results['ttest'] = (None, None)
-    
-    return results
+# Fonctions d'aide pour l'interface
+def colored_header(label, description, color_name="yellow-80"):
+    """Version simplifiée de colored_header"""
+    st.header(label)
+    if description:
+        st.caption(description)
+
+def add_vertical_space(num):
+    """Ajoute un espace vertical"""
+    for _ in range(num):
+        st.write("")
 
 # Initialisation de l'état de session
 if 'data' not in st.session_state:
@@ -299,7 +201,7 @@ with st.sidebar:
         uploaded_file = st.file_uploader(
             "Glissez votre fichier ici",
             type=['csv', 'xlsx', 'xls'],
-            help="Formats supportés: CSV, Excel"
+            help="Formats supportés: CSV, Excel. Le fichier doit contenir les colonnes Fire_Assay, Leach_Well, Lithologie, Niveau_Oxydation"
         )
         
         if uploaded_file is not None:
@@ -312,7 +214,7 @@ with st.sidebar:
                     
                     st.session_state.data = df
                     st.session_state.processed_data = df.copy()
-                    st.success(f"✅ {len(df)} échantillons chargés!")
+                    st.success(f"✅ {len(df)} échantillons chargés avec succès!")
                     
                     col1, col2 = st.columns(2)
                     with col1:
@@ -329,48 +231,95 @@ with st.sidebar:
             numeric_cols = st.session_state.data.select_dtypes(include=[np.number]).columns.tolist()
             categorical_cols = st.session_state.data.select_dtypes(include=['object']).columns.tolist()
             
-            # Valeurs par défaut intelligentes
+            # Détection automatique des colonnes
             default_fa = next((col for col in numeric_cols if 'fire' in col.lower() or 'fa' in col.lower()), numeric_cols[0] if numeric_cols else None)
-            default_lw = next((col for col in numeric_cols if 'leach' in col.lower() or 'lw' in col.lower()), numeric_cols[1] if len(numeric_cols) > 1 else None)
+            default_lw = next((col for col in numeric_cols if 'leach' in col.lower() or 'lw' in col.lower()), numeric_cols[1] if len(numeric_cols) > 1 else numeric_cols[0])
             default_litho = next((col for col in categorical_cols if 'litho' in col.lower()), categorical_cols[0] if categorical_cols else None)
-            default_oxid = next((col for col in categorical_cols if 'oxid' in col.lower() or 'oxyd' in col.lower()), categorical_cols[1] if len(categorical_cols) > 1 else None)
+            default_oxid = next((col for col in categorical_cols if 'oxid' in col.lower() or 'oxyd' in col.lower()), categorical_cols[1] if len(categorical_cols) > 1 else categorical_cols[0])
             
-            fire_assay_col = st.selectbox("Fire Assay", numeric_cols, index=numeric_cols.index(default_fa) if default_fa else 0)
-            leach_well_col = st.selectbox("Leach Well", numeric_cols, index=numeric_cols.index(default_lw) if default_lw else 0)
-            lithology_col = st.selectbox("Lithologie", categorical_cols, index=categorical_cols.index(default_litho) if default_litho else 0)
-            oxidation_col = st.selectbox("Niveau d'Oxydation", categorical_cols, index=categorical_cols.index(default_oxid) if default_oxid else 0)
+            if numeric_cols:
+                fire_assay_col = st.selectbox(
+                    "Fire Assay", 
+                    numeric_cols,
+                    index=numeric_cols.index(default_fa) if default_fa in numeric_cols else 0,
+                    help="Sélectionnez la colonne contenant les valeurs Fire Assay"
+                )
+                
+                leach_well_col = st.selectbox(
+                    "Leach Well", 
+                    numeric_cols,
+                    index=numeric_cols.index(default_lw) if default_lw in numeric_cols else 0,
+                    help="Sélectionnez la colonne contenant les valeurs Leach Well"
+                )
+            
+            if categorical_cols:
+                lithology_col = st.selectbox(
+                    "Lithologie", 
+                    categorical_cols,
+                    index=categorical_cols.index(default_litho) if default_litho in categorical_cols else 0,
+                    help="Sélectionnez la colonne contenant les types de lithologie"
+                )
+                
+                oxidation_col = st.selectbox(
+                    "Niveau d'Oxydation", 
+                    categorical_cols,
+                    index=categorical_cols.index(default_oxid) if default_oxid in categorical_cols else 0,
+                    help="Sélectionnez la colonne contenant les niveaux d'oxydation"
+                )
         
         # Gestion des outliers
         with st.expander("🎯 **Détection des Outliers**", expanded=False):
             st.info("🔍 Identifiez et gérez les valeurs aberrantes")
             
-            # Liste des méthodes disponibles selon les imports
-            methods = ["IQR (Interquartile Range)", "Percentiles"]
-            if SCIPY_AVAILABLE:
-                methods.insert(1, "Z-Score")
-            if SKLEARN_AVAILABLE:
-                methods.append("Isolation Forest")
-            
-            outlier_method = st.selectbox("Méthode de détection", methods)
+            outlier_method = st.selectbox(
+                "Méthode de détection",
+                ["IQR (Interquartile Range)", "Z-Score", "Percentiles"],
+                help="Choisissez la méthode de détection des outliers"
+            )
             
             outlier_column = st.selectbox(
                 "Colonne à analyser",
-                [fire_assay_col, leach_well_col, "Les deux"]
+                [fire_assay_col, leach_well_col, "Les deux"],
+                help="Sélectionnez la colonne pour la détection des outliers"
             )
             
-            # Paramètres selon la méthode
+            # Paramètres spécifiques
             if outlier_method == "IQR (Interquartile Range)":
-                iqr_multiplier = st.slider("Multiplicateur IQR", 1.0, 3.0, 1.5, 0.1)
+                iqr_multiplier = st.slider(
+                    "Multiplicateur IQR",
+                    min_value=1.0,
+                    max_value=3.0,
+                    value=1.5,
+                    step=0.1,
+                    help="Plus la valeur est élevée, moins il y aura d'outliers détectés"
+                )
             elif outlier_method == "Z-Score":
-                z_threshold = st.slider("Seuil Z-Score", 2.0, 4.0, 3.0, 0.1)
-            elif outlier_method == "Percentiles":
+                z_threshold = st.slider(
+                    "Seuil Z-Score",
+                    min_value=2.0,
+                    max_value=4.0,
+                    value=3.0,
+                    step=0.1,
+                    help="Valeurs avec |Z-Score| > seuil sont considérées comme outliers"
+                )
+            else:  # Percentiles
                 col1, col2 = st.columns(2)
                 with col1:
-                    lower_pct = st.number_input("Percentile inf. (%)", 0, 25, 5)
+                    lower_pct = st.number_input(
+                        "Percentile inf. (%)",
+                        min_value=0,
+                        max_value=25,
+                        value=5,
+                        help="Valeurs en dessous de ce percentile"
+                    )
                 with col2:
-                    upper_pct = st.number_input("Percentile sup. (%)", 75, 100, 95)
-            elif outlier_method == "Isolation Forest":
-                contamination = st.slider("Taux de contamination", 0.01, 0.3, 0.1, 0.01)
+                    upper_pct = st.number_input(
+                        "Percentile sup. (%)",
+                        min_value=75,
+                        max_value=100,
+                        value=95,
+                        help="Valeurs au-dessus de ce percentile"
+                    )
             
             if st.button("🔍 Détecter les Outliers", type="primary", use_container_width=True):
                 with st.spinner("Détection en cours..."):
@@ -383,27 +332,23 @@ with st.sidebar:
                                 outliers_fa, _, _ = detector.iqr_method(df_work, fire_assay_col, iqr_multiplier)
                                 outliers_lw, _, _ = detector.iqr_method(df_work, leach_well_col, iqr_multiplier)
                                 outliers = pd.concat([outliers_fa, outliers_lw]).drop_duplicates()
-                            elif outlier_method == "Z-Score" and SCIPY_AVAILABLE:
+                            elif outlier_method == "Z-Score":
                                 outliers_fa, _ = detector.zscore_method(df_work, fire_assay_col, z_threshold)
                                 outliers_lw, _ = detector.zscore_method(df_work, leach_well_col, z_threshold)
                                 outliers = pd.concat([outliers_fa, outliers_lw]).drop_duplicates()
-                            elif outlier_method == "Percentiles":
+                            else:  # Percentiles
                                 outliers_fa, _, _ = detector.percentile_method(df_work, fire_assay_col, lower_pct, upper_pct)
                                 outliers_lw, _, _ = detector.percentile_method(df_work, leach_well_col, lower_pct, upper_pct)
                                 outliers = pd.concat([outliers_fa, outliers_lw]).drop_duplicates()
-                            elif outlier_method == "Isolation Forest" and SKLEARN_AVAILABLE:
-                                outliers = detector.isolation_forest(df_work, [fire_assay_col, leach_well_col], contamination)
                         else:
                             col_to_analyze = fire_assay_col if outlier_column == fire_assay_col else leach_well_col
                             
                             if outlier_method == "IQR (Interquartile Range)":
                                 outliers, _, _ = detector.iqr_method(df_work, col_to_analyze, iqr_multiplier)
-                            elif outlier_method == "Z-Score" and SCIPY_AVAILABLE:
+                            elif outlier_method == "Z-Score":
                                 outliers, _ = detector.zscore_method(df_work, col_to_analyze, z_threshold)
-                            elif outlier_method == "Percentiles":
+                            else:  # Percentiles
                                 outliers, _, _ = detector.percentile_method(df_work, col_to_analyze, lower_pct, upper_pct)
-                            elif outlier_method == "Isolation Forest" and SKLEARN_AVAILABLE:
-                                outliers = detector.isolation_forest(df_work, [col_to_analyze], contamination)
                         
                         st.session_state.outlier_indices = outliers.index.tolist()
                         
@@ -412,13 +357,25 @@ with st.sidebar:
                             
                             col1, col2 = st.columns(2)
                             with col1:
-                                st.metric("Fire Assay", f"{outliers[fire_assay_col].mean():.2f} g/t")
+                                st.metric(
+                                    "Fire Assay",
+                                    f"{outliers[fire_assay_col].mean():.2f} g/t",
+                                    f"±{outliers[fire_assay_col].std():.2f}"
+                                )
                             with col2:
-                                st.metric("Leach Well", f"{outliers[leach_well_col].mean():.2f} g/t")
+                                st.metric(
+                                    "Leach Well",
+                                    f"{outliers[leach_well_col].mean():.2f} g/t",
+                                    f"±{outliers[leach_well_col].std():.2f}"
+                                )
                             
-                            action = st.radio("Action", ["Visualiser", "Exclure", "Conserver"], horizontal=True)
+                            action = st.radio(
+                                "Action à effectuer",
+                                ["Visualiser", "Exclure", "Conserver"],
+                                horizontal=True
+                            )
                             
-                            if st.button("✅ Appliquer", use_container_width=True):
+                            if st.button("✅ Appliquer", type="secondary", use_container_width=True):
                                 if action == "Exclure":
                                     st.session_state.processed_data = df_work.drop(outliers.index)
                                     st.session_state.outliers_removed = True
@@ -426,7 +383,7 @@ with st.sidebar:
                                 else:
                                     st.info("✅ Outliers conservés")
                         else:
-                            st.success("✅ Aucun outlier détecté")
+                            st.success("✅ Aucun outlier détecté avec ces paramètres")
                     except Exception as e:
                         st.error(f"Erreur lors de la détection: {str(e)}")
 
@@ -434,229 +391,312 @@ with st.sidebar:
 if st.session_state.data is not None:
     df = st.session_state.processed_data
     
-    # Indicateurs en haut
+    # Vérification des variables
+    if 'numeric_cols' not in locals():
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        categorical_cols = df.select_dtypes(include=['object']).columns.tolist()
+        
+        fire_assay_col = numeric_cols[0] if numeric_cols else None
+        leach_well_col = numeric_cols[1] if len(numeric_cols) > 1 else numeric_cols[0] if numeric_cols else None
+        lithology_col = categorical_cols[0] if categorical_cols else None
+        oxidation_col = categorical_cols[1] if len(categorical_cols) > 1 else categorical_cols[0] if categorical_cols else None
+    
+    # Indicateurs de performance
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         st.markdown(f"""
             <div class="stat-card">
-                <h3>Échantillons</h3>
+                <h3>Échantillons Analysés</h3>
                 <div class="value">{len(df):,}</div>
             </div>
         """, unsafe_allow_html=True)
     
     with col2:
-        st.markdown(f"""
-            <div class="stat-card">
-                <h3>Fire Assay Moy.</h3>
-                <div class="value">{df[fire_assay_col].mean():.2f} g/t</div>
-            </div>
-        """, unsafe_allow_html=True)
+        if fire_assay_col:
+            avg_fa = df[fire_assay_col].mean()
+            st.markdown(f"""
+                <div class="stat-card">
+                    <h3>Moyenne Fire Assay</h3>
+                    <div class="value">{avg_fa:.2f} g/t</div>
+                </div>
+            """, unsafe_allow_html=True)
     
     with col3:
-        st.markdown(f"""
-            <div class="stat-card">
-                <h3>Leach Well Moy.</h3>
-                <div class="value">{df[leach_well_col].mean():.2f} g/t</div>
-            </div>
-        """, unsafe_allow_html=True)
+        if leach_well_col:
+            avg_lw = df[leach_well_col].mean()
+            st.markdown(f"""
+                <div class="stat-card">
+                    <h3>Moyenne Leach Well</h3>
+                    <div class="value">{avg_lw:.2f} g/t</div>
+                </div>
+            """, unsafe_allow_html=True)
     
     with col4:
-        correlation = df[[fire_assay_col, leach_well_col]].corr().iloc[0,1]
-        st.markdown(f"""
-            <div class="stat-card">
-                <h3>Corrélation</h3>
-                <div class="value">{correlation:.3f}</div>
-            </div>
-        """, unsafe_allow_html=True)
+        if fire_assay_col and leach_well_col:
+            correlation = df[[fire_assay_col, leach_well_col]].corr().iloc[0,1]
+            st.markdown(f"""
+                <div class="stat-card">
+                    <h3>Corrélation</h3>
+                    <div class="value">{correlation:.3f}</div>
+                </div>
+            """, unsafe_allow_html=True)
     
     add_vertical_space(2)
+    
+    # Indicateur outliers
+    if st.session_state.outliers_removed:
+        st.info(f"ℹ️ Données filtrées: {len(st.session_state.data) - len(df)} outliers exclus")
     
     # Onglets
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📊 Vue d'ensemble",
         "📈 Analyses Statistiques",
-        "🔍 Comparaison",
-        "🗺️ Lithologie",
-        "💾 Export"
+        "🔍 Comparaison des Méthodes",
+        "🗺️ Analyse par Lithologie",
+        "💾 Export & Rapports"
     ])
     
     with tab1:
-        st.header("Vue d'ensemble des Données")
+        colored_header(
+            label="Vue d'ensemble des Données",
+            description="Exploration et filtrage des données",
+            color_name="blue-70"
+        )
         
         # Filtres
-        col1, col2 = st.columns(2)
-        with col1:
-            selected_litho = st.multiselect(
-                "Filtrer par lithologie",
-                df[lithology_col].unique(),
-                default=df[lithology_col].unique()
-            )
-        with col2:
-            selected_oxid = st.multiselect(
-                "Filtrer par oxydation",
-                df[oxidation_col].unique(),
-                default=df[oxidation_col].unique()
-            )
-        
-        filtered_df = df[(df[lithology_col].isin(selected_litho)) & 
-                        (df[oxidation_col].isin(selected_oxid))]
-        
-        st.dataframe(filtered_df, use_container_width=True, height=400)
-        
-        # Stats descriptives
-        st.subheader("Statistiques Descriptives")
-        stats_df = filtered_df[[fire_assay_col, leach_well_col]].describe()
-        st.dataframe(stats_df.round(3))
-    
-    with tab2:
-        st.header("Analyses Statistiques")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Histogramme Fire Assay
-            fig_fa = px.histogram(
-                filtered_df,
-                x=fire_assay_col,
-                title="Distribution Fire Assay",
-                nbins=50,
-                color_discrete_sequence=['#FFD700']
-            )
-            fig_fa.add_vline(
-                x=filtered_df[fire_assay_col].mean(),
-                line_dash="dash",
-                annotation_text="Moyenne"
-            )
-            st.plotly_chart(fig_fa, use_container_width=True)
-        
-        with col2:
-            # Histogramme Leach Well
-            fig_lw = px.histogram(
-                filtered_df,
-                x=leach_well_col,
-                title="Distribution Leach Well",
-                nbins=50,
-                color_discrete_sequence=['#FFA500']
-            )
-            fig_lw.add_vline(
-                x=filtered_df[leach_well_col].mean(),
-                line_dash="dash",
-                annotation_text="Moyenne"
-            )
-            st.plotly_chart(fig_lw, use_container_width=True)
-        
-        # Tests statistiques
-        if SCIPY_AVAILABLE:
-            st.subheader("Tests Statistiques")
-            test_results = perform_statistical_tests(filtered_df, fire_assay_col, leach_well_col)
-            
-            col1, col2, col3 = st.columns(3)
+        if lithology_col and oxidation_col:
+            col1, col2 = st.columns(2)
             
             with col1:
-                st.markdown("**Test de Normalité (Shapiro-Wilk)**")
-                if test_results['shapiro_test'][fire_assay_col] is not None:
-                    st.write(f"Fire Assay p-value: {test_results['shapiro_test'][fire_assay_col]:.4f}")
-                    st.write(f"Leach Well p-value: {test_results['shapiro_test'][leach_well_col]:.4f}")
+                selected_litho = st.multiselect(
+                    "🗿 Filtrer par lithologie",
+                    df[lithology_col].unique(),
+                    default=df[lithology_col].unique()
+                )
             
             with col2:
-                st.markdown("**Corrélations**")
-                pearson_corr, pearson_p = test_results['correlations']['pearson']
-                if pearson_corr is not None:
-                    st.write(f"Pearson: {pearson_corr:.3f}")
-                    if pearson_p is not None:
-                        st.write(f"p-value: {pearson_p:.4f}")
+                selected_oxid = st.multiselect(
+                    "🌡️ Filtrer par niveau d'oxydation",
+                    df[oxidation_col].unique(),
+                    default=df[oxidation_col].unique()
+                )
             
-            with col3:
-                st.markdown("**Test t apparié**")
-                t_stat, t_p = test_results['ttest']
-                if t_stat is not None:
-                    st.write(f"Statistique t: {t_stat:.3f}")
-                    st.write(f"p-value: {t_p:.4f}")
+            filtered_df = df[(df[lithology_col].isin(selected_litho)) & 
+                            (df[oxidation_col].isin(selected_oxid))]
+        else:
+            filtered_df = df
+        
+        # Affichage des données
+        st.subheader("📋 Tableau des Données")
+        st.dataframe(filtered_df, use_container_width=True, height=400)
+        
+        # Statistiques descriptives
+        if fire_assay_col and leach_well_col:
+            st.subheader("📊 Statistiques Descriptives")
+            stats_df = filtered_df[[fire_assay_col, leach_well_col]].describe()
+            st.dataframe(stats_df.round(3))
+    
+    with tab2:
+        colored_header(
+            label="Analyses Statistiques Détaillées",
+            description="Distributions et visualisations",
+            color_name="orange-70"
+        )
+        
+        if fire_assay_col and leach_well_col:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Histogramme Fire Assay
+                fig_fa = px.histogram(
+                    filtered_df,
+                    x=fire_assay_col,
+                    title="Distribution Fire Assay",
+                    nbins=50,
+                    color_discrete_sequence=['#FFD700']
+                )
+                fig_fa.add_vline(
+                    x=filtered_df[fire_assay_col].mean(),
+                    line_dash="dash",
+                    line_color="red",
+                    annotation_text="Moyenne"
+                )
+                st.plotly_chart(fig_fa, use_container_width=True)
+                
+                # Box plot par lithologie
+                if lithology_col:
+                    fig_box_litho = px.box(
+                        filtered_df,
+                        x=lithology_col,
+                        y=fire_assay_col,
+                        title="Fire Assay par Lithologie"
+                    )
+                    fig_box_litho.update_layout(xaxis_tickangle=-45)
+                    st.plotly_chart(fig_box_litho, use_container_width=True)
+            
+            with col2:
+                # Histogramme Leach Well
+                fig_lw = px.histogram(
+                    filtered_df,
+                    x=leach_well_col,
+                    title="Distribution Leach Well",
+                    nbins=50,
+                    color_discrete_sequence=['#FFA500']
+                )
+                fig_lw.add_vline(
+                    x=filtered_df[leach_well_col].mean(),
+                    line_dash="dash",
+                    line_color="red",
+                    annotation_text="Moyenne"
+                )
+                st.plotly_chart(fig_lw, use_container_width=True)
+                
+                # Box plot par oxydation
+                if oxidation_col:
+                    fig_box_oxid = px.box(
+                        filtered_df,
+                        x=oxidation_col,
+                        y=leach_well_col,
+                        title="Leach Well par Niveau d'Oxydation"
+                    )
+                    fig_box_oxid.update_layout(xaxis_tickangle=-45)
+                    st.plotly_chart(fig_box_oxid, use_container_width=True)
     
     with tab3:
-        st.header("Comparaison Fire Assay vs Leach Well")
-        
-        # Calculs
-        filtered_df['Ratio_LW_FA'] = filtered_df[leach_well_col] / filtered_df[fire_assay_col]
-        filtered_df['Difference'] = filtered_df[leach_well_col] - filtered_df[fire_assay_col]
-        filtered_df['Pct_Difference'] = (filtered_df['Difference'] / filtered_df[fire_assay_col]) * 100
-        
-        # Graphique de corrélation
-        fig_scatter = px.scatter(
-            filtered_df,
-            x=fire_assay_col,
-            y=leach_well_col,
-            color=lithology_col,
-            title="Corrélation Fire Assay vs Leach Well",
-            trendline="ols"
+        colored_header(
+            label="Comparaison Fire Assay vs Leach Well",
+            description="Analyse de corrélation et différences",
+            color_name="green-70"
         )
         
-        # Ligne 1:1
-        max_val = max(filtered_df[fire_assay_col].max(), filtered_df[leach_well_col].max())
-        fig_scatter.add_trace(go.Scatter(
-            x=[0, max_val],
-            y=[0, max_val],
-            mode='lines',
-            name='Ligne 1:1',
-            line=dict(color='red', dash='dash')
-        ))
-        
-        st.plotly_chart(fig_scatter, use_container_width=True)
-        
-        # Métriques
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Ratio moyen LW/FA", f"{filtered_df['Ratio_LW_FA'].mean():.2f}")
-        with col2:
-            st.metric("Différence moyenne", f"{filtered_df['Difference'].mean():.2f} g/t")
-        with col3:
-            st.metric("% Différence", f"{filtered_df['Pct_Difference'].mean():.1f}%")
+        if fire_assay_col and leach_well_col:
+            # Calculs
+            filtered_df['Ratio_LW_FA'] = filtered_df[leach_well_col] / filtered_df[fire_assay_col]
+            filtered_df['Difference'] = filtered_df[leach_well_col] - filtered_df[fire_assay_col]
+            filtered_df['Pct_Difference'] = (filtered_df['Difference'] / filtered_df[fire_assay_col]) * 100
+            
+            # Graphique de corrélation
+            fig_scatter = px.scatter(
+                filtered_df,
+                x=fire_assay_col,
+                y=leach_well_col,
+                color=lithology_col if lithology_col else None,
+                title="Corrélation Fire Assay vs Leach Well",
+                trendline="ols"
+            )
+            
+            # Ligne 1:1
+            max_val = max(filtered_df[fire_assay_col].max(), filtered_df[leach_well_col].max())
+            fig_scatter.add_trace(go.Scatter(
+                x=[0, max_val],
+                y=[0, max_val],
+                mode='lines',
+                name='Ligne 1:1',
+                line=dict(color='red', dash='dash')
+            ))
+            
+            st.plotly_chart(fig_scatter, use_container_width=True)
+            
+            # Métriques
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Ratio moyen LW/FA", f"{filtered_df['Ratio_LW_FA'].mean():.2f}")
+            with col2:
+                st.metric("Différence moyenne", f"{filtered_df['Difference'].mean():.2f} g/t")
+            with col3:
+                st.metric("% Différence moyen", f"{filtered_df['Pct_Difference'].mean():.1f}%")
+            
+            # Analyse par classe de teneur
+            st.subheader("Comparaison par Classe de Teneur")
+            
+            bins = [0, 0.5, 1, 2, 5, 10, 100]
+            labels = ['<0.5', '0.5-1', '1-2', '2-5', '5-10', '>10']
+            filtered_df['Classe_Teneur'] = pd.cut(filtered_df[fire_assay_col], bins=bins, labels=labels)
+            
+            class_stats = filtered_df.groupby('Classe_Teneur', observed=True).agg({
+                fire_assay_col: ['count', 'mean'],
+                leach_well_col: 'mean',
+                'Ratio_LW_FA': 'mean'
+            }).round(2)
+            
+            st.dataframe(class_stats)
     
     with tab4:
-        st.header("Analyse par Lithologie")
-        
-        # Tableau croisé
-        pivot_table = pd.pivot_table(
-            filtered_df,
-            values=[fire_assay_col, leach_well_col],
-            index=lithology_col,
-            columns=oxidation_col,
-            aggfunc='mean'
+        colored_header(
+            label="Analyse par Lithologie et Oxydation",
+            description="Comportement selon les caractéristiques géologiques",
+            color_name="red-70"
         )
         
-        st.dataframe(pivot_table.round(2), use_container_width=True)
-        
-        # Graphique par lithologie
-        fig_litho = px.box(
-            filtered_df,
-            x=lithology_col,
-            y=fire_assay_col,
-            color=oxidation_col,
-            title="Distribution Fire Assay par Lithologie"
-        )
-        st.plotly_chart(fig_litho, use_container_width=True)
+        if lithology_col and oxidation_col and fire_assay_col and leach_well_col:
+            # Tableau croisé
+            pivot_table = pd.pivot_table(
+                filtered_df,
+                values=[fire_assay_col, leach_well_col],
+                index=lithology_col,
+                columns=oxidation_col,
+                aggfunc='mean'
+            )
+            
+            st.subheader("Teneurs Moyennes par Lithologie et Oxydation")
+            st.dataframe(pivot_table.round(2))
+            
+            # Graphiques
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                fig_fa_group = px.bar(
+                    filtered_df.groupby([lithology_col])[fire_assay_col].mean().reset_index(),
+                    x=lithology_col,
+                    y=fire_assay_col,
+                    title="Fire Assay Moyen par Lithologie",
+                    color_discrete_sequence=['#FFD700']
+                )
+                st.plotly_chart(fig_fa_group, use_container_width=True)
+            
+            with col2:
+                fig_lw_group = px.bar(
+                    filtered_df.groupby([oxidation_col])[leach_well_col].mean().reset_index(),
+                    x=oxidation_col,
+                    y=leach_well_col,
+                    title="Leach Well Moyen par Oxydation",
+                    color_discrete_sequence=['#FFA500']
+                )
+                st.plotly_chart(fig_lw_group, use_container_width=True)
     
     with tab5:
-        st.header("Export des Résultats")
+        colored_header(
+            label="Export des Résultats",
+            description="Génération de rapports et export de données",
+            color_name="blue-green-70"
+        )
+        
+        st.subheader("📝 Configuration du Rapport")
         
         col1, col2 = st.columns(2)
         
         with col1:
+            report_title = st.text_input(
+                "Titre du rapport",
+                value=f"Analyse des Données Aurifères - {datetime.now().strftime('%Y-%m-%d')}"
+            )
+            
             export_format = st.selectbox(
                 "Format d'export",
-                ["CSV", "Excel"]
+                ["Excel", "CSV"]
             )
         
         with col2:
             include_stats = st.checkbox("Inclure les statistiques", value=True)
+            include_charts = st.checkbox("Inclure les graphiques", value=False)
         
-        if st.button("📥 Générer l'Export", type="primary", use_container_width=True):
+        if st.button("📥 Générer le Rapport", type="primary", use_container_width=True):
             try:
                 if export_format == "CSV":
                     csv = filtered_df.to_csv(index=False)
                     st.download_button(
-                        label="Télécharger CSV",
+                        label="Télécharger le CSV",
                         data=csv,
                         file_name=f"analyse_or_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                         mime="text/csv"
@@ -664,60 +704,94 @@ if st.session_state.data is not None:
                 else:  # Excel
                     buffer = io.BytesIO()
                     with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                        # Données principales
                         filtered_df.to_excel(writer, sheet_name='Données', index=False)
                         
-                        if include_stats:
+                        if include_stats and fire_assay_col and leach_well_col:
+                            # Statistiques descriptives
                             stats_df.to_excel(writer, sheet_name='Statistiques')
                             
                             # Résumé par lithologie
-                            summary = filtered_df.groupby([lithology_col, oxidation_col]).agg({
-                                fire_assay_col: ['count', 'mean', 'std'],
-                                leach_well_col: ['mean', 'std']
-                            }).round(3)
-                            summary.to_excel(writer, sheet_name='Résumé')
+                            if lithology_col and oxidation_col:
+                                summary = filtered_df.groupby([lithology_col, oxidation_col]).agg({
+                                    fire_assay_col: ['count', 'mean', 'std'],
+                                    leach_well_col: ['mean', 'std']
+                                }).round(3)
+                                summary.to_excel(writer, sheet_name='Résumé')
+                        
+                        # Métadonnées
+                        metadata = pd.DataFrame({
+                            'Paramètre': ['Titre', 'Date', 'Auteur', 'Échantillons analysés', 'Outliers exclus'],
+                            'Valeur': [
+                                report_title,
+                                datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                                'Didier Ouedraogo, P.Geo',
+                                len(filtered_df),
+                                'Oui' if st.session_state.outliers_removed else 'Non'
+                            ]
+                        })
+                        metadata.to_excel(writer, sheet_name='Métadonnées', index=False)
                     
                     st.download_button(
-                        label="Télécharger Excel",
+                        label="Télécharger le Rapport Excel",
                         data=buffer.getvalue(),
-                        file_name=f"analyse_or_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                        file_name=f"rapport_analyse_or_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
                 
-                st.success("✅ Export généré avec succès!")
+                st.success("✅ Rapport généré avec succès!")
                 
             except Exception as e:
-                st.error(f"Erreur lors de l'export: {str(e)}")
+                st.error(f"Erreur lors de la génération: {str(e)}")
 
 else:
     # Page d'accueil
     st.markdown("""
         <div style='text-align: center; padding: 50px;'>
             <h2 style='color: #FFD700;'>Bienvenue dans Gold Analysis Pro</h2>
-            <p style='font-size: 1.2rem;'>
-                L'outil d'analyse des données aurifères
+            <p style='font-size: 1.2rem; margin: 20px 0;'>
+                L'outil professionnel pour l'analyse des données aurifères
             </p>
-            <p>👈 Chargez vos données dans le panneau latéral</p>
+            <p style='color: #B8BCC0;'>
+                👈 Commencez par charger vos données dans le panneau latéral
+            </p>
         </div>
     """, unsafe_allow_html=True)
     
-    # Exemple de données
-    st.subheader("Format des Données Requis")
+    # Exemple de structure
+    st.subheader("📋 Structure de Données Attendue")
     
-    example_df = pd.DataFrame({
-        'Sample_ID': ['ECH-001', 'ECH-002', 'ECH-003'],
-        'Fire_Assay': [1.25, 0.85, 3.45],
-        'Leach_Well': [1.15, 0.92, 2.98],
-        'Lithologie': ['Granite', 'Schiste', 'Granite'],
-        'Niveau_Oxydation': ['Oxydé', 'Frais', 'Oxydé']
+    example_data = pd.DataFrame({
+        'Sample_ID': ['S001', 'S002', 'S003', 'S004', 'S005'],
+        'Fire_Assay': [1.25, 0.85, 3.45, 0.55, 2.15],
+        'Leach_Well': [1.15, 0.92, 2.98, 0.61, 2.05],
+        'Lithologie': ['Granite', 'Schiste', 'Granite', 'Schiste', 'Quartzite'],
+        'Niveau_Oxydation': ['Oxydé', 'Frais', 'Oxydé', 'Transition', 'Frais']
     })
     
-    st.dataframe(example_df)
+    st.dataframe(example_data)
+    
+    # Télécharger l'exemple
+    csv_example = example_data.to_csv(index=False)
+    st.download_button(
+        label="📥 Télécharger l'exemple",
+        data=csv_example,
+        file_name="exemple_donnees_or.csv",
+        mime="text/csv"
+    )
 
 # Footer
 st.markdown("---")
 st.markdown("""
-    <div style='text-align: center; padding: 20px;'>
-        <p style='color: #FFD700;'>🏆 Gold Analysis Pro v2.1</p>
-        <p>Développé par Didier Ouedraogo, P.Geo | © 2025</p>
+    <div style='text-align: center; padding: 20px; background-color: #1E2329; border-radius: 10px;'>
+        <p style='color: #FFD700; font-size: 1.1rem; margin: 0;'>
+            🏆 Gold Analysis Pro v2.1
+        </p>
+        <p style='color: #B8BCC0; margin: 5px 0;'>
+            Développé par Didier Ouedraogo, P.Geo
+        </p>
+        <p style='color: #6C757D; font-size: 0.9rem;'>
+            © 2025 - Analyse Avancée des Données Aurifères
+        </p>
     </div>
 """, unsafe_allow_html=True)
